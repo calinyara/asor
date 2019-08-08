@@ -1,0 +1,63 @@
+#This is a make file with common rules for both x86 & x86-64
+
+all: directories asor_cases
+
+asorobjs += lib/pci.o
+asorobjs += lib/pci-edu.o
+asorobjs += lib/alloc.o
+asorobjs += lib/vmalloc.o
+asorobjs += lib/alloc_page.o
+asorobjs += lib/alloc_phys.o
+asorobjs += lib/elf.o
+asorobjs += lib/x86/setup.o
+asorobjs += lib/x86/io.o
+asorobjs += lib/x86/smp.o
+asorobjs += lib/x86/vm.o
+asorobjs += lib/x86/fwcfg.o
+asorobjs += lib/x86/apic.o
+asorobjs += lib/x86/atomic.o
+asorobjs += lib/x86/desc.o
+asorobjs += lib/x86/isr.o
+asorobjs += lib/x86/acpi.o
+asorobjs += lib/x86/stack.o
+asorobjs += lib/x86/fault_test.o
+asorobjs += lib/x86/delay.o
+asorobjs += x86/vmx.o
+asorobjs += x86/ept.o
+asorobjs += x86/vm.o
+
+OBJDIRS += lib/x86
+
+$(libasor): LDFLAGS += -nostdlib
+$(libasor): CFLAGS += -ffreestanding -I $(SRCDIR)/lib -I lib -I $(SRCDIR)/include
+
+COMMON_CFLAGS += -m$(bits)
+COMMON_CFLAGS += -O1
+
+# stack.o relies on frame pointers.
+KEEP_FRAME_POINTER := y
+
+libgcc := $(shell $(CC) -m$(bits) --print-libgcc-file-name)
+
+# We want to keep intermediate file: %.elf and %.o 
+.PRECIOUS: %.elf %.o
+
+FLATLIBS = lib/libasor.a $(libgcc)
+%.elf: %.o $(FLATLIBS) $(SRCDIR)/x86/flat.lds $(cstart.o)
+	$(CC) $(CFLAGS) -nostdlib -o $@ -Wl,-T,$(SRCDIR)/x86/flat.lds \
+		$(filter %.o, $^) $(FLATLIBS)
+	@chmod a-x $@
+
+%.flat: %.elf
+	$(OBJCOPY) -O elf32-i386 $^ $@
+	@chmod a-x $@
+
+asor_cases: $(asor)
+
+$(ASOR_DIR)/%.o: CFLAGS += -std=gnu99 -ffreestanding -I $(SRCDIR)/lib -I $(SRCDIR)/lib/x86 -I lib -I $(SRCDIR)/include
+
+arch_clean:
+	$(RM) $(ASOR_DIR)/*.o $(ASOR_DIR)/*.flat $(ASOR_DIR)/*.elf $(ASOR_DIR)/.*.d \
+        lib/x86/.*.d driver/.*.d \
+	
+	

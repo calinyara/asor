@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+if [ -z "$STANDALONE" ]; then
+	if [ ! -f config.mak ]; then
+		echo "run ./configure && make first. See ./configure -h"
+		exit 2
+	fi
+	source config.mak
+	source scripts/arch-run.bash
+fi
+
+ACCEL=$(get_qemu_accelerator) ||
+	exit $?
+
+qemu=$(search_qemu_binary) ||
+	exit $?
+
+if ! ${qemu} -device '?' 2>&1 | grep -F -e \"testdev\" -e \"pc-testdev\" > /dev/null;
+then
+    echo "No Qemu test device support found"
+    exit 2
+fi
+
+if
+	${qemu} -device '?' 2>&1 | grep -F "pci-testdev" > /dev/null;
+then
+	pci_testdev="-device pci-testdev"
+else
+	pci_testdev=""
+fi
+
+if
+	${qemu} -device '?' 2>&1 | grep -F "pc-testdev" > /dev/null;
+then
+	pc_testdev="-device pc-testdev -device isa-debug-exit,iobase=0xf4,iosize=0x4"
+else
+	pc_testdev="-device testdev,chardev=testlog -chardev file,id=testlog,path=msr.out"
+fi
+
+command="${qemu} -nodefaults $pc_testdev -vnc none -serial stdio $pci_testdev"
+command+=" -smp cpus=2 -machine accel=$ACCEL -kernel"
+command="$(timeout_cmd) $command"
+
+run_qemu ${command} "$@"

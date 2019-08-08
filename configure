@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+
+srcdir=$(cd "$(dirname "$0")"; pwd)
+prefix=/usr/local
+cc=gcc
+cxx=g++
+ld=ld
+objcopy=objcopy
+objdump=objdump
+ar=ar
+addr2line=addr2line
+arch=`uname -m | sed -e 's/i.86/i386/;s/arm.*/arm/;s/ppc64.*/ppc64/'`
+host=$arch
+cross_prefix=
+endian=""
+pretty_print_stacks=yes
+environ_default=yes
+u32_long=
+vmm="qemu"
+errata_force=0
+
+usage() {
+    cat <<-EOF
+	Usage: $0 [options]
+
+	Options include:
+	    --arch=ARCH            architecture to compile for ($arch)
+	    --processor=PROCESSOR  processor to compile for ($arch)
+	    --vmm=VMM              virtual machine monitor to compile for (qemu
+	                           or kvmtool, default is qemu) (arm/arm64 only)
+	    --cross-prefix=PREFIX  cross compiler prefix
+	    --cc=CC		   c compiler to use ($cc)
+	    --cxx=CXX		   c++ compiler to use ($cxx)
+	    --ld=LD		   ld linker to use ($ld)
+	    --prefix=PREFIX        where to install things ($prefix)
+	    --endian=ENDIAN        endianness to compile for (little or big, ppc64 only)
+	    --[enable|disable]-pretty-print-stacks
+	                           enable or disable pretty stack printing (enabled by default)
+	    --[enable|disable]-default-environ
+	                           enable or disable the generation of a default environ when
+	                           no environ is provided by the user (enabled by default)
+EOF
+    exit 1
+}
+
+while [[ "$1" = -* ]]; do
+    opt="$1"; shift
+    arg=
+    if [[ "$opt" = *=* ]]; then
+	arg="${opt#*=}"
+	opt="${opt%%=*}"
+    fi
+    case "$opt" in
+	--prefix)
+	    prefix="$arg"
+	    ;;
+        --arch)
+	    arch="$arg"
+	    ;;
+        --processor)
+	    processor="$arg"
+	    ;;
+	--vmm)
+	    vmm="$arg"
+	    ;;
+	--cross-prefix)
+	    cross_prefix="$arg"
+	    ;;
+	--endian)
+	    endian="$arg"
+	    ;;
+	--cc)
+	    cc="$arg"
+	    ;;
+	--cxx)
+	    cxx="$arg"
+	    ;;
+	--ld)
+	    ld="$arg"
+	    ;;
+	--enable-pretty-print-stacks)
+	    pretty_print_stacks=yes
+	    ;;
+	--disable-pretty-print-stacks)
+	    pretty_print_stacks=no
+	    ;;
+	--enable-default-environ)
+	    environ_default=yes
+	    ;;
+	--disable-default-environ)
+	    environ_default=no
+	    ;;
+	--help)
+	    usage
+	    ;;
+	*)
+	    usage
+	    ;;
+    esac
+done
+
+arch_name=$arch
+[ "$arch" = "aarch64" ] && arch="arm64"
+[ "$arch_name" = "arm64" ] && arch_name="aarch64"
+
+[ -z "$processor" ] && processor="$arch"
+
+if [ "$processor" = "arm64" ]; then
+    processor="cortex-a57"
+elif [ "$processor" = "arm" ]; then
+    processor="cortex-a15"
+fi
+
+if [ "$arch" = "i386" ] || [ "$arch" = "x86_64" ]; then
+    asordir=x86
+elif [ "$arch" = "arm" ] || [ "$arch" = "arm64" ]; then
+    asordir=arm
+    if [ "$vmm" = "qemu" ]; then
+        arm_uart_early_addr=0x09000000
+    elif [ "$vmm" = "kvmtool" ]; then
+        arm_uart_early_addr=0x3f8
+        errata_force=1
+    else
+        echo '--vmm must be one of "qemu" or "kvmtool"!'
+        usage
+    fi
+elif [ "$arch" = "ppc64" ]; then
+    asordir=powerpc
+    firmware="$asordir/boot_rom.bin"
+    if [ "$endian" != "little" ] && [ "$endian" != "big" ]; then
+        echo "You must provide endianness (big or little)!"
+        usage
+    fi
+else
+    asordir=$arch
+fi
+if [ ! -d "$srcdir/$asordir" ]; then
+    echo "$asordir does not exist!"
+    exit 1
+fi
+if [ -f "$srcdir/$asordir/run" ]; then
+    ln -fs "$srcdir/$asordir/run" $asordir-run
+fi
+
+# check if uint32_t needs a long format modifier
+cat << EOF > lib-test.c
+__UINT32_TYPE__
+EOF
+u32_long=$("$cross_prefix$cc" -E lib-test.c | grep -v '^#' | grep -q long && echo yes)
+rm -f lib-test.c
+
+# api/: check for dependent 32 bit libraries and gnu++11 support
+if [ "$asordir" = "x86" ]; then
+    echo 'int main () {}' > lib-test.c
+    if $cc -m32 -o /dev/null -lstdc++ -lpthread -lrt lib-test.c &> /dev/null &&
+       $cxx -m32 -o /dev/null -std=gnu++11 lib-test.c &> /dev/null; then
+        api=yes
+    fi
+    rm -f lib-test.c
+fi
+
+# Are we in a separate build tree? If so, link the Makefile
+# and shared stuff so that 'make' and run_tests.sh work.
+if test ! -e Makefile; then
+    echo "linking Makefile..."
+    ln -s "$srcdir/Makefile" .
+
+    echo "linking tests..."
+    mkdir -p $asordir
+    ln -sf "$srcdir/$asordir/run" $asordir/
+    ln -sf "$srcdir/$asordir/unittests.cfg" $asordir/
+    ln -sf "$srcdir/run_tests.sh"
+
+    echo "linking scripts..."
+    ln -sf "$srcdir/scripts"
+
+    echo "linking errata.txt..."
+    ln -sf "$srcdir/errata.txt"
+fi
+
+# link lib/asm for the architecture
+rm -f lib/asm
+asm="asm-generic"
+if [ -d "$srcdir/lib/$arch/asm" ]; then
+	asm="$srcdir/lib/$arch/asm"
+elif [ -d "$srcdir/lib/$asordir/asm" ]; then
+	asm="$srcdir/lib/$asordir/asm"
+fi
+mkdir -p lib
+ln -sf "$asm" lib/asm
+
+
+# create the config
+cat <<EOF > config.mak
+SRCDIR=$srcdir
+PREFIX=$prefix
+HOST=$host
+ARCH=$arch
+ARCH_NAME=$arch_name
+PROCESSOR=$processor
+CC=$cross_prefix$cc
+CXX=$cross_prefix$cxx
+LD=$cross_prefix$ld
+OBJCOPY=$cross_prefix$objcopy
+OBJDUMP=$cross_prefix$objdump
+AR=$cross_prefix$ar
+ADDR2LINE=$cross_prefix$addr2line
+API=$api
+ASOR_DIR=$asordir
+FIRMWARE=$firmware
+ENDIAN=$endian
+PRETTY_PRINT_STACKS=$pretty_print_stacks
+ENVIRON_DEFAULT=$environ_default
+ERRATATXT=errata.txt
+U32_LONG_FMT=$u32_long
+EOF
+
+cat <<EOF > lib/config.h
+#ifndef CONFIG_H
+#define CONFIG_H 1
+/*
+ * Generated file. DO NOT MODIFY.
+ *
+ */
+
+EOF
+if [ "$arch" = "arm" ] || [ "$arch" = "arm64" ]; then
+cat <<EOF >> lib/config.h
+
+#define CONFIG_UART_EARLY_BASE ${arm_uart_early_addr}
+#define CONFIG_ERRATA_FORCE ${errata_force}
+
+EOF
+fi
+echo "#endif" >> lib/config.h

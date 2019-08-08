@@ -1,0 +1,9 @@
+cstart.o = $(ASOR_DIR)/cstart.o
+bits = 32
+ldarch = elf32-i386
+
+asorobjs += lib/x86/setjmp32.o
+
+asor = $(ASOR_DIR)/asor.flat
+
+include $(SRCDIR)/$(ASOR_DIR)/Makefile.common

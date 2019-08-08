@@ -1,0 +1,12 @@
+cstart.o = $(ASOR_DIR)/cstart64.o
+bits = 64
+ldarch = elf64-x86-64
+COMMON_CFLAGS += -mno-red-zone -mno-sse -mno-sse2 -DX64
+
+asorobjs += lib/x86/setjmp64.o
+asorobjs += lib/x86/intel-iommu.o
+asorobjs += lib/x86/usermode.o
+
+asor = $(ASOR_DIR)/asor.flat
+
+include $(SRCDIR)/$(ASOR_DIR)/Makefile.common
