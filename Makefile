@@ -57,6 +57,7 @@ COMMON_CFLAGS += -Wall -Wwrite-strings -Wclobbered -Wempty-body -Wuninitialized
 COMMON_CFLAGS += -Wignored-qualifiers -Wunused-but-set-parameter
 COMMON_CFLAGS += -Wmissing-prototypes -Wstrict-prototypes
 COMMON_CFLAGS += -Werror -Wno-unused-result
+COMMON_CFLAGS += -ggdb -gstabs+
 frame-pointer-flag=-f$(if $(KEEP_FRAME_POINTER),no-,)omit-frame-pointer
 fomit_frame_pointer := $(call cc-option, $(frame-pointer-flag), "")
 fnostack_protector := $(call cc-option, -fno-stack-protector, "")
@@ -139,8 +140,14 @@ img: all
 	sync
 	sudo umount /mnt/asor
 	sudo kpartx -d asor.img
+	cp x86/asor.elf asor
 
 .PHONY:qemu
 qemu:
 	qemu -hda asor.img -boot c -cpu host -enable-kvm -serial stdio
 
+.PHONY:debug
+debug:
+	qemu -S -s -hda asor.img -boot c -cpu host -enable-kvm &
+	sleep 1
+	cgdb -x scripts/gdbinit

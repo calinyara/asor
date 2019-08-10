@@ -1,0 +1,4 @@
+file asor
+target remote :1234
+hbreak asor_entry
+c
