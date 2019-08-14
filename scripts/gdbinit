@@ -1,4 +1,6 @@
 file asor
 target remote :1234
+hbreak prepare_64
+hbreak enter_long_mode
 hbreak asor_entry
 c
