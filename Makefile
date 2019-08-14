@@ -110,7 +110,7 @@ install: standalone
 	install tests/* $(DESTDIR)
 
 clean: arch_clean
-	$(RM) lib/.*.d core/.*.d $(libasor) $(asorobjs)
+	$(RM) lib/.*.d core/.*.d $(libasor) $(asorobjs) asor
 
 libfdt_clean:
 	$(RM) $(LIBFDT_archive) \
