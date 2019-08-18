@@ -1,0 +1,11 @@
+/config.mak
+/*-run
+/lib/asm
+/build-head
+*.a
+*.d
+*.o
+*.flat
+*.elf
+.pc
+/lib/config.h
